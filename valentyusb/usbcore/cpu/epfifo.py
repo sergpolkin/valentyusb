@@ -81,6 +81,8 @@ class Endpoint(Module, AutoCSR):
                 toggle.eq(0),
             ),
         ]
+        # for ibuf FIFO only
+        self.data_get = Signal()
 
         self.submodules.fake = FakeFifo()
         self.ibuf = None
@@ -142,12 +144,15 @@ class EndpointIn(Endpoint):
         xxxx_readable = Signal()
         self.specials.crc_readable = cdc.MultiReg(self.ibuf.readable, xxxx_readable)
 
+        self.usb_reset = Signal()
+
         self.ibuf_head = CSR(8)
         self.ibuf_empty = CSRStatus(1)
         self.comb += [
             self.ibuf.din.eq(self.ibuf_head.r),
             self.ibuf.we.eq(self.ibuf_head.re),
             self.ibuf_empty.status[0].eq(~xxxx_readable),
+            self.ibuf.re.eq(self.data_get | self.usb_reset),
         ]
         self.obuf = self.fake
 
@@ -221,6 +226,7 @@ class PerEndpointFifoInterface(Module, AutoCSR):
             if endp & EndpointType.IN:
                 exec("self.submodules.ep_%s_in = ep = EndpointIn()" % i)
                 iep = getattr(self, "ep_%s_in" % i)
+                self.comb += iep.usb_reset.eq(~iobuf.usb_pullup | usb_core.usb_reset)
                 ems.append(iep.ev)
             else:
                 iep = EndpointNone()
@@ -254,7 +260,7 @@ class PerEndpointFifoInterface(Module, AutoCSR):
         # is no longer readable.
         last_start = Signal()
         self.sync += [
-            last_start.eq(usb_core.start),
+            last_start.eq(usb_core.poll),
             If(~debug_packet_detected,
                 If(last_start,
                     If(usb_core.tok == PID.SETUP,
@@ -307,7 +313,7 @@ class PerEndpointFifoInterface(Module, AutoCSR):
             # [In Endpoint]Device->Host pathway
             usb_core.data_send_have.eq(debug_data_ready_mux),
             usb_core.data_send_payload.eq(debug_data_mux),
-            eps[eps_idx].ibuf.re.eq((usb_core.data_send_get & ~debug_packet_detected) | ~iobuf.usb_pullup),
+            eps[eps_idx].data_get.eq(usb_core.data_send_get & ~debug_packet_detected),
         ]
 
 
@@ -335,5 +341,7 @@ class PerEndpointFifoInterface(Module, AutoCSR):
             If(usb_core.error,
                 # error_count.eq(error_count + 1),
                 usb_core.reset.eq(1),
-            ),
+            ).Elif(self.pullup._out.re & self.pullup._out.storage,
+                usb_core.reset.eq(0),
+            )
         ]

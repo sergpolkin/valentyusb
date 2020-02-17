@@ -241,9 +241,9 @@ class UsbTransfer(Module):
                 self.commit.eq(1),
                 If(rxstate.o_pid == PID.ACK,
                     NextState("WAIT_TOKEN"),
-                ).Elif(rxstate.o_pid == PID.IN,
-                    self.retry.eq(1),
-                    NextState("SEND_DATA"),
+                #).Elif(rxstate.o_pid == PID.IN,
+                #    self.retry.eq(1),
+                #    NextState("SEND_DATA"),
                 ).Else(
                     NextState("ERROR"),
                 )
